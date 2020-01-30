@@ -282,7 +282,7 @@
         ExportedFile = ExportData.ExportToExcel(dtElement, dtRecom);
 
         //new
-
+        _Barconfig.Data.Labels.Clear();
         _Barconfig.Data.Labels.AddRange(inputData
         .Select(p => p.Key));
 
@@ -298,7 +298,9 @@
         };
         var datas1 = (inputData
        .Select(p => new LineDataXpress() { Wave = double.Parse(p.Key), YValue = p.Value }));
+       
         barSet.AddRange(datas1);
+        _Barconfig.Data.Datasets.Clear();
         _Barconfig.Data.Datasets.Add(barSet);
         await _barChartJs.Update();
 
