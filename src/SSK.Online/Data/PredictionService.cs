@@ -42,20 +42,20 @@ namespace SSK.Online.Data
             }
             return dt;
         }
-        public async Task<Dictionary<string, double>> InferenceWithApi()
+        public async Task<(Dictionary<string, double> hasil, Dictionary<string, float> input)> InferenceWithApi(string DataInputFile=null)
         {
             //var modelOut = new ModelOutput();
             var ApiRef = StorageInfo.GetAbsolutePath("Files") + "/Service_SSK.csv";
             var dt = ConvertCSVtoDataTable(ApiRef);
             var sampleFile = StorageInfo.GetAbsolutePath("Files")+$"/Measurement_Perc_7.Spectrum";
-            var DataInput = PrepTool.PreprocessDataInput(File.ReadAllText(sampleFile));
+            var DataInput = !string.IsNullOrEmpty(DataInputFile) ? PrepTool.PreprocessDataInput(DataInputFile) : PrepTool.PreprocessDataInput(File.ReadAllText(sampleFile));
             Dictionary<string, double> hasil = new Dictionary<string, double>();
             foreach (DataRow dr in dt.Rows)
             {
                 var nilai = await Predict(dr["input"].ToString(), DataInput, dr["key"].ToString(), dr["url"].ToString());
                 hasil.Add(dr["input"].ToString(), nilai < 0 ? 0 : nilai);
             }
-            return hasil;
+            return (hasil,DataInput);
         }
         public RecommendationOutput GetFertilizerRecommendation(string komoditas,ModelOutput unsur)
         {

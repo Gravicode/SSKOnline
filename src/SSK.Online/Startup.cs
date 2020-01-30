@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SSK.Online.Data;
 
+
 namespace SSK.Online
 {
     public class Startup
@@ -30,6 +31,7 @@ namespace SSK.Online
             services.AddServerSideBlazor();
             services.AddSingleton<WeatherForecastService>();
             services.AddSingleton<PredictionService>();
+           
 
         }
 

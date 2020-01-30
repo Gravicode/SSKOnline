@@ -1,61 +1,216 @@
 ﻿@page "/prediction"
+@page "/"
 
 @using SSK.Online.Data
 @inject PredictionService PredictionService1
 @using PKDSS.CoreLibrary.Model
+@inject IJSRuntime js
+@using System.Data
+@using SSK.Online.Model
 
+@using ChartJs.Blazor.Charts
+@using ChartJs.Blazor.ChartJS
+@using ChartJs.Blazor.ChartJS.Common.Properties
+@using ChartJs.Blazor.ChartJS.Common.Enums
+@using ChartJs.Blazor.ChartJS.Common.Axes
+@using ChartJs.Blazor.ChartJS.Common.Axes.Ticks
+@using ChartJs.Blazor.ChartJS.Common.Time
+@using ChartJs.Blazor.ChartJS.Common.Handlers
+@using ChartJs.Blazor.ChartJS.LineChart
+@using ChartJs.Blazor.Util
 
-    <div class="container-fluid">
-        <div class="row">
-            <div class="col-lg-12">
-                <h1>SSK Online v0.1</h1>
-                <p>This app will predict the soil element and give a recommendation for fertilizer.</p>
+@using ChartJs.Blazor.ChartJS.BarChart
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-lg-12">
+            <h1>Soil Sensing Analyzer Online v0.1</h1>
+            <p>This app will predict the soil elements from Neospectra Vis-NIR sensor data and give a recommendation for soil fertilizer.</p>
+            <p>if you don't have any device to capture reflectance data from soil, take a look <a href="https://www.neospectra.com/our-offerings/neospectra-scanner/">here</a></p>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-lg-4">
+            <div>
+                <div class="form-group">
+                    <label for="selkomoditas">Choose Commodity:</label>
+                    <select @bind="SelKomoditas" id="selkomoditas" class="form-control">
+                        <option value="Padi">Rice (Padi)</option>
+                        <option selected value="Jagung">Corn (Jagung)</option>
+                        <option value="Kedelai">Soy (Kedelai)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="selengine">Choose Inference API:</label>
+                    <select @bind="SelEngine" id="selengine" class="form-control">
+                        <option selected value="AzureMLStudio">Azure ML Studio</option>
+                        <option value="MLNET">ML.NET (in the future)</option>
+                    </select>
+                </div>
+                @if (fileName != null)
+                {
+                <button @onclick="Predict" class="btn btn-info">Process</button>
+                }
             </div>
         </div>
-        <div class="row">
-            <div class="col-lg-4">
+        <div class="col-lg-4">
+            <div class="drag-drop-zone">
+                <InputFile OnChange="ViewFile" />
 
-                <select @bind="SelKomoditas">
-                    <option value="Padi">Padi</option>
-                    <option value="Jagung">Jagung</option>
-                    <option value="Kedelai">Kedelai</option>
-
-                </select>
-            </div>
-        </div>
-        <div class="row">
-            <div class="col-lg-4">
-                <button class="btn btn-primary" @onclick="Predict">Call Service</button>
+                @status
 
             </div>
+            <a href="/temp/sample.Spectrum.txt">Download Sample File Input</a>
         </div>
-        <div class="row">
-            <div class="col-lg-12">
-                @Status
-                @((MarkupString)Data)
-                @((MarkupString)Recommendation)
+        <div class="col-lg-4">
+            <div class="file-viewer">
+                @if (fileName != null)
+                {
+                <h3>@fileName</h3>
+                <pre>@fileTextContents</pre>
+                }
             </div>
         </div>
     </div>
 
+    <div class="row">
+        <div class="col-lg-12 mt-3">
+            @if (!string.IsNullOrEmpty(StatusInfo))
+            {
+            <div class="alert alert-warning" role="alert">
+                @StatusInfo
+            </div>
+            }
+            @if (isDataReady)
+            {
+            <button @onclick="DownloadFile" class="btn btn-success mb-3">Export to Excel</button>
+            }
+            @((MarkupString)Data)
+            @((MarkupString)Recommendation)
+
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-lg-12 mt-3">
+            <ChartJsBarChart @ref="_barChartJs" Config="@_Barconfig" Width="900" Height="400" />
+            <div class="alert alert-info">
+                <h3>Steps:</h3>
+                <ul>
+                    <li>Spectral Trimming</li>
+                    <li>Conversion to Absorbance</li>
+                    <li>Savitzky-Golay Smoothing</li>
+                    <li>Standard Normal Variate (SNV)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
 @code {
+    bool isDataReady;
     string Data;
-    string Status;
+    string StatusInfo;
     string Recommendation;
     string SelKomoditas;
+    string SelEngine;
+    #region export data
+    string ExportedFile;
+    #endregion
+    #region inputfile
+    const string DefaultStatus = "Drop an output file (from Neospectra device with Spectromost app) to view it, or click to choose a file";
+    const int MaxFileSize = 5 * 1024 * 1024; // 5MB
+    string status = DefaultStatus;
+
+    string fileName;
+    string fileTextContents;
+    #endregion
+    #region chart
+
+    private BarConfig _Barconfig;
+    private ChartJsBarChart _barChartJs;
+    #endregion
+
+    protected override async Task OnInitializedAsync()
+    {
+
+        //new
+        _Barconfig = new BarConfig
+        {
+            Options = new BarOptions
+            {
+                Title = new OptionsTitle
+                {
+                    Display = true,
+                    Text = "Pre-processed Wave Data"
+                },
+                Responsive = true,
+
+            }
+        };
+
+
+
+    }
+    async void DownloadFile()
+    {
+        if (!string.IsNullOrEmpty(ExportedFile))
+        {
+            var bytes = File.ReadAllBytes(ExportedFile);
+            await FileUtil.SaveAs(js, "Exported.xlsx", bytes);
+        }
+        else
+        {
+            await Alert("Failed to export file, something wrong.");
+        }
+    }
+
+    async Task Alert(string Message)
+    {
+        await js.InvokeVoidAsync(
+           "modalFunctions.showInfo",
+           Message);
+
+    }
 
     async void Predict()
     {
-        Status = "loading...";
-        var Temp = "<table class='table table-bordered'><tr><th>Unsur</th><th>Nilai</th></tr>";
-        var result = await PredictionService1.InferenceWithApi();
+
+        if (SelEngine == "MLNET")
+        {
+            Alert("Engine will be available in the future.");
+                return;
+        }
+        DataTable dtElement = new DataTable("element");
+        DataTable dtRecom = new DataTable("recommendation");
+        dtElement.Columns.Add("No");
+        dtElement.Columns.Add("Element");
+        dtElement.Columns.Add("Value");
+        dtElement.Columns.Add("Unit");
+
+
+        ExportedFile = "";
+        isDataReady = false;
+        StatusInfo = "Process data against 21 models, please wait...";
+        Data = "";
+        Recommendation = "";
+        var Temp = "<table class='table table-bordered'><tr><th>Element</th><th>Value</th><th>Unit</th></tr>";
+        var (result, inputData) = await PredictionService1.InferenceWithApi(fileTextContents);
+        int RowCount = 0;
         foreach (var item in result)
         {
-            Temp += $"<tr><td>{item.Key}</td><td>{item.Value}</td></tr>";
+            Temp += $"<tr><td>{item.Key}</td><td>{item.Value}</td><td>{ AppConstants.ElementUnits[item.Key] }</td></tr>";
+            var dr = dtElement.NewRow();
+            dr["No"] = ++RowCount;
+            dr["Element"] = item.Key;
+            dr["Value"] = item.Value;
+            dr["Unit"] = AppConstants.ElementUnits[item.Key];
+            dtElement.Rows.Add(dr);
         }
+        dtElement.AcceptChanges();
         Temp += "</table>";
         Data = Temp;
-        Status = "";
+        StatusInfo = "Process output with recommendation algorthm...";
+
         var input = new ModelOutput();
         input.Bray1_P2O5 = result["Bray1_P2O5"];
         input.Ca = result["Ca"];
@@ -79,17 +234,106 @@
         input.SILT = result["SILT"];
         input.WBC = result["WBC"];
         var result2 = PredictionService1.GetFertilizerRecommendation(SelKomoditas, input);
-        var temp2 = "<table class='table table-bordered'><tr><th>Fertilizer</th><th>Recommendation</th></tr>";
+        var temp2 = "<table class='table table-bordered'><tr><th>Fertilizer</th><th>Recommendation</th><th>Unit</th></tr>";
 
-        temp2 += $"<tr><td>KCL</td><td>{(result2.KCL < 0 ? "-" : result2.KCL.ToString("n2"))}</td></tr>";
-        temp2 += $"<tr><td>SP36</td><td>{(result2.SP36 < 0 ? "-" : result2.SP36.ToString("n2"))}</td></tr>";
-        temp2 += $"<tr><td>Urea</td><td>{(result2.Urea < 0 ? "-" : result2.Urea.ToString("n2"))}</td></tr>";
-        temp2 += $"<tr><td>NPK 15</td><td>{ (result2.NPK15 < 0 ? "-" : result2.NPK15.ToString("n2"))  }</td></tr>";
-        temp2 += $"<tr><td>Uread 15</td><td>{ (result2.Urea15 < 0 ? "-" : result2.Urea15.ToString("n2")) }</td></tr>";
+        temp2 += $"<tr><td>KCL</td><td>{(result2.KCL < 0 ? "-" : result2.KCL.ToString("n2"))}</td><td>kg/ha</td></tr>";
+        temp2 += $"<tr><td>SP36</td><td>{(result2.SP36 < 0 ? "-" : result2.SP36.ToString("n2"))}</td><td>kg/ha</td></tr>";
+        temp2 += $"<tr><td>Urea</td><td>{(result2.Urea < 0 ? "-" : result2.Urea.ToString("n2"))}</td><td>kg/ha</td></tr>";
+        temp2 += $"<tr><td>NPK 15:15:15</td><td>{ (result2.NPK15 < 0 ? "-" : result2.NPK15.ToString("n2"))  }</td><td>kg/ha</td></tr>";
+        temp2 += $"<tr><td>Uread 15:15:15</td><td>{ (result2.Urea15 < 0 ? "-" : result2.Urea15.ToString("n2")) }</td><td>kg/ha</td></tr>";
         temp2 += "<table>";
-        Recommendation = temp2;
-        StateHasChanged();
 
+        dtRecom.Columns.Add("Fertilizer");
+        dtRecom.Columns.Add("Recommendation");
+        dtRecom.Columns.Add("Unit");
+
+        var dr1 = dtRecom.NewRow();
+        dr1["Fertilizer"] = "KCL";
+        dr1["Recommendation"] = result2.KCL < 0 ? "-" : result2.KCL.ToString("n2");
+        dr1["Unit"] = "kg/ha";
+        dtRecom.Rows.Add(dr1);
+
+        dr1 = dtRecom.NewRow();
+        dr1["Fertilizer"] = "SP36";
+        dr1["Recommendation"] = result2.SP36 < 0 ? "-" : result2.SP36.ToString("n2");
+        dr1["Unit"] = "kg/ha";
+        dtRecom.Rows.Add(dr1);
+
+        dr1 = dtRecom.NewRow();
+        dr1["Fertilizer"] = "Urea";
+        dr1["Recommendation"] = result2.Urea < 0 ? "-" : result2.Urea.ToString("n2");
+        dr1["Unit"] = "kg/ha";
+        dtRecom.Rows.Add(dr1);
+
+        dr1 = dtRecom.NewRow();
+        dr1["Fertilizer"] = "NPK 15:15:15";
+        dr1["Recommendation"] = result2.NPK15 < 0 ? "-" : result2.NPK15.ToString("n2");
+        dr1["Unit"] = "kg/ha";
+        dtRecom.Rows.Add(dr1);
+
+        dr1 = dtRecom.NewRow();
+        dr1["Fertilizer"] = "Uread 15:15:15";
+        dr1["Recommendation"] = result2.Urea15 < 0 ? "-" : result2.Urea15.ToString("n2");
+        dr1["Unit"] = "kg/ha";
+        dtRecom.Rows.Add(dr1);
+
+        dtRecom.AcceptChanges();
+
+        ExportedFile = ExportData.ExportToExcel(dtElement, dtRecom);
+
+        //new
+
+        _Barconfig.Data.Labels.AddRange(inputData
+        .Select(p => p.Key));
+
+        var barSet = new BarDataset<LineDataXpress>
+        {
+            BorderWidth = 0,
+            HoverBackgroundColor = ColorUtil.RandomColorString(),
+            HoverBorderColor = ColorUtil.RandomColorString(),
+            HoverBorderWidth = 1,
+            BorderColor = "#ffffff",
+            Label="Preprocessed Data"
+
+        };
+        var datas1 = (inputData
+       .Select(p => new LineDataXpress() { Wave = double.Parse(p.Key), YValue = p.Value }));
+        barSet.AddRange(datas1);
+        _Barconfig.Data.Datasets.Add(barSet);
+        await _barChartJs.Update();
+
+
+
+        Recommendation = temp2;
+        StatusInfo = "";
+        isDataReady = true;
+
+        StateHasChanged();
     }
 
+
+    async Task ViewFile(IFileListEntry[] files)
+    {
+        var file = files.FirstOrDefault();
+        if (file == null)
+        {
+            return;
+        }
+        else if (file.Size > MaxFileSize)
+        {
+            status = $"That's too big. Max size: {MaxFileSize} bytes.";
+        }
+        else
+        {
+            status = "Loading...";
+
+            using (var reader = new StreamReader(file.Data))
+            {
+                fileTextContents = await reader.ReadToEndAsync();
+                fileName = file.Name;
+            }
+
+            status = DefaultStatus;
+        }
+    }
 }
